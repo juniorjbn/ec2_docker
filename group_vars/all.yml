@@ -1,0 +1,17 @@
+ssh_key_name: YourSshKeyName
+aws_region: codigo_da_region #example us-east-1
+ami_id: ami-116d857a #debian-jessie defaul AMI
+instance_type: t2.small #example
+vpc_id: vpc-2bd6334f #example
+subnet_id: subnet-b6511f9d #example
+vm_count: 1
+cidr_ip: 10.5.15.0/26 #example
+HOSTNAME: DockerHost #example
+APP: front #example
+COMPANY: 123 #example
+REPOSITORY_URL: bitbucket.org #example
+REPO_ADDRESS: git@bitbucket.org:SeuRepo/containers.git
+DOCKERFILE_PATH: path/to/dockerfile
+EXT_PORT: 8080 #example
+INT_PORT: 80 #example
+SECRET_ENV: SuperSecretEnv

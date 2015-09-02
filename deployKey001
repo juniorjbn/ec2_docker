@@ -1,0 +1,4 @@
+deployKey001
+Put Your private key here, this is used to clone your private docker repository into machine.
+
+Remenber to configure deploy_keys on settings in your repository 

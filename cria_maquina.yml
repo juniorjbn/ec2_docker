@@ -1,0 +1,159 @@
+# Cria uma máquina
+- hosts: localhost
+  connection: local
+  gather_facts: False
+  tasks:
+  - name: "Create security group"
+    ec2_group: 
+      name: docker_group
+      description: "Docker Security group"
+      vpc_id: "{{vpc_id}}"
+      region: "{{aws_region}}"
+      rules:
+        - proto: tcp
+          type: ssh
+          from_port: 22
+          to_port: 22
+          cidr_ip: 0.0.0.0/0
+        - proto: tcp
+          type: http
+          from_port: {{ INT_PORT }}
+          to_port: {{ INT_PORT }}
+          cidr_ip: 0.0.0.0/0
+      rules_egress:
+        - proto: all
+          type: all
+          cidr_ip: 0.0.0.0/0
+    register: EC2_SECURITY
+
+  - name: Creates EC2 Instance
+    local_action: ec2 key_name="{{ssh_key_name}}"
+      vpc_subnet_id="{{subnet_id}}"
+      region="{{aws_region}}"
+      group_id="{{EC2_SECURITY.group_id}}"
+      instance_type="{{instance_type}}"
+      image="{{ami_id}}"
+      wait=yes
+      assign_public_ip=yes
+    register: ec2
+
+  - name: " Add host to instance group
+    add_host: hostname={{ item.public_ip }} groupname=machines
+    with_items: ec2.instances
+
+  - name: "Wait ssh 22 port responds"
+    wait_for: port=22 host="{{ item.public_ip }}" search_regex=OpenSSH delay=10 
+    with_items: ec2.instances
+
+# Install docker needs"
+- hosts: machines
+  gather_facts: True
+  vars:
+    - ansible_python_interpreter: python
+  tasks:
+    - name: Adjust Hostname
+      sudo: yes
+      hostname: name={{ HOSTNAME }}
+
+    - name: Adjust Hosts
+      sudo: yes
+      lineinfile: "dest=/etc/hosts state=present insertafter='localhost' line='127.0.1.1  {{ HOSTNAME }}'"
+
+    - name: "add docker sources"
+      sudo: yes
+      copy: src=docker.list dest=/etc/apt/sources.list.d/docker.list
+
+    - name: "Install PKGs"
+      sudo: yes
+      apt: pkg={{item}} update_cache=yes state=latest install_recommends=yes force=yes
+      with_items:
+       - telnet
+       - curl
+       - git
+       - wget
+       - vim
+       - unzip
+       - python-pip
+       - docker.io
+
+    - name: Install Docker-py
+      sudo: yes
+      pip: name=docker-py version=1.2.3
+
+   #### Deploy Part
+
+    - name: Delete releases
+      sudo: yes
+      ignore_errors: True
+      shell: "cd /home/{{ APP }}/releases && ls -t1 /home/{{ APP }}/releases | tail -n +{{ QT_RELEASES }} | xargs rm -rf"
+
+    - name: Get release timestamp
+      command: date +%Y%m%d%H%M
+      register: RELEASE_DATE
+
+    - name: Create deploy directory tree
+      sudo: yes
+      file: path=/home/{{ APP }}/releases/{{ RELEASE_DATE.stdout }} state=directory
+
+    - name: create group for user
+      sudo: yes
+      group: name={{ APP }} state=present
+
+    - name: create user and group with app name
+      sudo: yes
+      user: name={{ APP }} group={{ APP }} shell=/bin/bash
+
+    - name: set user to sudoers
+      sudo: yes
+      lineinfile: "dest=/etc/sudoers state=present regexp='^%{{ APP }}' line='%{{ APP }} ALL=(ALL) NOPASSWD: ALL'"
+
+    - name: adjust user home permission
+      sudo: yes
+      file: path=/home/{{ APP }} state=touch owner={{ APP }} group={{ APP }}
+
+    - name: get host_key for repository
+      sudo: yes
+      lineinfile: "dest=/etc/ssh/ssh_config state=present regexp='^%Host' line='    StrictHostKeyChecking no'"
+
+    - name: ensure repository is a known host
+      sudo: yes
+      lineinfile:
+        dest: /root/.ssh/known_hosts
+        create: yes
+        state: present
+        line: "{{ lookup('pipe', 'ssh-keyscan -t rsa {{ REPOSITORY_URL}}') }}"
+        regexp: "^bitbucket\\.org"
+
+    - name: put deployKey on host
+      sudo: yes
+      copy: src=deployKey001 dest=/home/{{ APP }}/ owner={{ APP }} group={{ APP }} mode=0644
+
+    - name: clone the repo
+      sudo: yes
+      git: repo={{ REPO_ADDRESS }}
+           dest=/home/{{ APP }}/releases/{{ RELEASE_DATE.stdout }}
+           key_file=/home/{{ APP }}/deployKey001
+           version=master
+
+    - name: Adjust project permission
+      sudo: yes
+      file: path=/home/{{ APP }}/releases/{{ RELEASE_DATE.stdout }} state=directory recurse=yes owner={{ APP }} group={{ APP }}
+
+    - name: build images
+      sudo: yes
+      docker_image: path=/home/{{ APP }}/releases/{{ RELEASE_DATE.stdout }}/{{ DOCKERFILE_PATH }} name="{{ COMPANY }}/{{ APP }}" state=present
+
+    - name: remove files
+      sudo: yes
+      file: path=/home/{{ APP }}/releases/{{ RELEASE_DATE.stdout }} state=absent
+
+    - name: run dockers 
+      sudo: yes
+      docker:
+        name: "{{ APP }}"
+        image: "{{ COMPANY }}/{{ APP }}"
+        state: started
+        ports:
+          - "{{ EXT_PORT }}:{{ INT_PORT }}"
+        env:
+          SECRET_KEY: {{ SERCRET_ENV }}
