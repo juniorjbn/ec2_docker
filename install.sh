@@ -6,7 +6,7 @@ echo "deb https://apt.dockerproject.org/repo ubuntu-xenial main" > /etc/apt/sour
 
 apt-get purge lxc-docker && apt-get update && apt-get install apt-transport-https ca-certificates linux-image-extra-$(uname -r)
 
-apt-get install docker-engine
+apt-get install -y docker-engine
 
 service docker start && systemctl enable docker
 
